@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ambiente Virtual
+.env
+.venv/
+*.sqlite3
+*.db
+weights.db
+
+# Pipenv
+Pipfile.lock
+
+# Docker
+.DS_Store
+docker-compose.yml
+
+# Fly.io
+fly.toml
