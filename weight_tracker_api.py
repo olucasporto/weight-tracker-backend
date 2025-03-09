@@ -11,7 +11,6 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
@@ -37,7 +36,6 @@ def get_db_connection():
         print(f"❌ Erro ao conectar ao banco de dados: {e}")
         raise HTTPException(status_code=500, detail="Erro ao conectar ao banco de dados")
 
-
 def create_table():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -46,15 +44,11 @@ def create_table():
             id SERIAL PRIMARY KEY,
             date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             weight REAL NOT NULL
-        )
+        );
     """)
     conn.commit()
     cur.close()
     conn.close()
-
-
-create_table()
-
 
 def send_email(weight):
     if not all([SENDER_EMAIL, RECEIVER_EMAIL, EMAIL_PASSWORD]):
@@ -65,7 +59,6 @@ def send_email(weight):
     msg["Subject"] = "Atualização de Peso 📊"
     msg["From"] = SENDER_EMAIL
     msg["To"] = RECEIVER_EMAIL
-
     msg.attach(MIMEText(f"Peso de hoje: {weight} kg"))
 
     try:
@@ -76,25 +69,25 @@ def send_email(weight):
     except Exception as e:
         print(f"❌ Erro ao enviar e-mail: {e}")
 
+@app.on_event("startup")
+def startup_event():
+    create_table()
+
 @app.post("/register_weight/")
 def register_weight(data: WeightInput):
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
-        cur.execute("INSERT INTO weights (weight) VALUES (%s) RETURNING id;", (data.weight,))
+        cur.execute("INSERT INTO weights (weight) VALUES (%s)", (data.weight,))
         conn.commit()
         cur.close()
         conn.close()
-
         send_email(data.weight)
-
         return {"message": "Peso registrado e e-mail enviado!"}
-
     except Exception as e:
         conn.rollback()
         cur.close()
         conn.close()
         print(f"❌ Erro ao registrar peso: {e}")
         raise HTTPException(status_code=500, detail="Erro ao registrar peso")
-
