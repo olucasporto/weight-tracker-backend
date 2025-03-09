@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import sqlite3
+import psycopg2
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -8,8 +8,9 @@ from dotenv import load_dotenv
 import os
 from fastapi.middleware.cors import CORSMiddleware
 
-# Carregar variáveis do .env
 load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
@@ -17,26 +18,44 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
 app = FastAPI()
 
-# Configurar CORS para permitir requisições do frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # ⚠️ Modo aberto (pode restringir depois)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Modelo Pydantic para validar entrada de dados
 class WeightInput(BaseModel):
     weight: float
 
-# Conectar ao banco SQLite
 def get_db_connection():
-    conn = sqlite3.connect("weights.db")
-    conn.execute("CREATE TABLE IF NOT EXISTS weights (id INTEGER PRIMARY KEY, date TEXT, weight REAL)")
-    return conn
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    except Exception as e:
+        print(f"❌ Erro ao conectar ao banco de dados: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao conectar ao banco de dados")
 
-# Função para enviar e-mail
+
+def create_table():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS weights (
+            id SERIAL PRIMARY KEY,
+            date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            weight REAL NOT NULL
+        )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+create_table()
+
+
 def send_email(weight):
     if not all([SENDER_EMAIL, RECEIVER_EMAIL, EMAIL_PASSWORD]):
         print("Erro: Credenciais de e-mail não configuradas corretamente no .env")
@@ -47,7 +66,6 @@ def send_email(weight):
     msg["From"] = SENDER_EMAIL
     msg["To"] = RECEIVER_EMAIL
 
-    # Corpo do e-mail
     msg.attach(MIMEText(f"Peso de hoje: {weight} kg"))
 
     try:
@@ -61,9 +79,22 @@ def send_email(weight):
 @app.post("/register_weight/")
 def register_weight(data: WeightInput):
     conn = get_db_connection()
-    conn.execute("INSERT INTO weights (date, weight) VALUES (date('now'), ?)", (data.weight,))
-    conn.commit()
-    conn.close()
+    cur = conn.cursor()
 
-    send_email(data.weight)  # Envia e-mail automaticamente
-    return {"message": "Peso registrado e e-mail enviado!"}
+    try:
+        cur.execute("INSERT INTO weights (weight) VALUES (%s) RETURNING id;", (data.weight,))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        send_email(data.weight)
+
+        return {"message": "Peso registrado e e-mail enviado!"}
+
+    except Exception as e:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        print(f"❌ Erro ao registrar peso: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao registrar peso")
+
